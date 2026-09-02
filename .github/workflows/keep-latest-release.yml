@@ -1,0 +1,44 @@
+name: Manter somente a release atual
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remover releases e tags anteriores
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          keep_tag="${RELEASE_TAG:-}"
+          if [ -z "$keep_tag" ]; then
+            keep_tag="$(gh api "repos/$GH_REPO/releases/latest" --jq '.tag_name')"
+          fi
+
+          echo "Preservando $keep_tag"
+          gh api "repos/$GH_REPO/releases" --paginate --jq '.[].tag_name' |
+            while IFS= read -r tag; do
+              if [ -n "$tag" ] && [ "$tag" != "$keep_tag" ]; then
+                echo "Removendo release $tag"
+                gh release delete "$tag" --repo "$GH_REPO" --cleanup-tag --yes
+              fi
+            done
+
+          gh api "repos/$GH_REPO/tags" --paginate --jq '.[].name' |
+            while IFS= read -r tag; do
+              if [ -n "$tag" ] && [ "$tag" != "$keep_tag" ]; then
+                echo "Removendo tag antiga $tag"
+                gh api --method DELETE "repos/$GH_REPO/git/refs/tags/$tag"
+              fi
+            done
